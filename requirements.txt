@@ -3,4 +3,5 @@ yt-dlp>=2024.10.0
 youtube-comment-downloader>=0.1.78
 requests>=2.31.0
 gunicorn
-youtube-transcript-api
+
+  
