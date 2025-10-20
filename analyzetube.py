@@ -1,272 +1,249 @@
-#!/usr/bin/env python3
-"""
-AnalyzeTube - Versione completa e universale
-Compatibile con Render e altri hosting.
-Gestisce automaticamente cookie, fallback e messaggi d’errore.
-"""
-
-from flask import Flask, request, jsonify
-import yt_dlp
-import re
-import requests
+from flask import Flask, render_template, request, send_file, flash, redirect, url_for
+import pandas as pd
 import os
-from youtube_comment_downloader import YoutubeCommentDownloader, SORT_BY_POPULAR
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
+app.secret_key = 'your-secret-key-change-this'
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['OUTPUT_FOLDER'] = 'outputs'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+app.config['ALLOWED_EXTENSIONS'] = {'xlsx', 'xls'}
 
-# =====================================================================
-# HTML + CSS + JS ORIGINALE
-# =====================================================================
+# Crea cartelle se non esistono
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
-HTML_TEMPLATE = '''<!DOCTYPE html>
-<html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AnalyzeTube - Analisi Video YouTube</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .container {
-            max-width: 900px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            overflow: hidden;
-        }
-        header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px 30px;
-            text-align: center;
-        }
-        header h1 { font-size: 2.5em; margin-bottom: 10px; }
-        .subtitle { font-size: 1.1em; opacity: 0.9; }
-        main { padding: 40px 30px; }
-        .input-section { margin-bottom: 30px; }
-        label { display: block; margin-bottom: 10px; font-weight: 600; color: #555; }
-        input[type="text"] {
-            width: 100%; padding: 15px; font-size: 16px;
-            border: 2px solid #e0e0e0; border-radius: 10px; transition: border-color 0.3s;
-        }
-        input[type="text"]:focus { outline: none; border-color: #667eea; }
-        button {
-            width: 100%; padding: 15px; margin-top: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white; border: none; border-radius: 10px;
-            font-size: 16px; font-weight: 600; cursor: pointer;
-            transition: transform 0.2s;
-        }
-        button:hover:not(:disabled) { transform: translateY(-2px); }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .loading { text-align: center; padding: 40px; }
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 50px; height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .hidden { display: none !important; }
-        .error {
-            background: #fee; border: 2px solid #fcc;
-            color: #c33; padding: 15px;
-            border-radius: 10px; margin-bottom: 20px;
-        }
-        .results { animation: fadeIn 0.5s; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        .video-info { margin-bottom: 30px; padding: 20px; background: #f8f9fa; border-radius: 10px; }
-        .video-info h2 { color: #333; margin-bottom: 15px; }
-        .stats { display: flex; gap: 20px; flex-wrap: wrap; }
-        .stats span {
-            background: white; padding: 8px 15px;
-            border-radius: 20px; font-size: 0.9em; color: #666;
-        }
-        footer { text-align: center; padding: 20px; background: #f8f9fa; color: #666; }
-    </style>
-</head>
-<body>
-<div class="container">
-<header><h1>🎥 AnalyzeTube</h1><p class="subtitle">Analisi automatica di video YouTube</p></header>
-<main>
-<div class="input-section">
-<label for="youtube-url">URL Video YouTube:</label>
-<input type="text" id="youtube-url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
-<button id="analyze-btn" onclick="analyzeVideo()">Analizza Video</button>
-</div>
-<div id="loading" class="loading hidden"><div class="spinner"></div><p id="loading-text">Estrazione in corso...</p></div>
-<div id="error" class="error hidden"></div>
-<div id="results" class="results hidden">
-<div class="video-info"><h2 id="video-title"></h2>
-<div class="stats">
-<span id="transcript-length"></span><span id="comments-count"></span>
-</div></div>
-<details><summary>📝 Trascrizione</summary><pre id="transcript-content"></pre></details>
-<details><summary>💬 Commenti</summary><pre id="comments-content"></pre></details>
-</div></main>
-<footer><p>Powered by yt-dlp + youtube-comment-downloader</p></footer>
-</div>
-<script>
-async function analyzeVideo(){
- const url=document.getElementById('youtube-url').value.trim();
- if(!url)return showError('Inserisci un URL valido');
- hideError(); hideResults(); showLoading('Estrazione...');
- const r=await fetch('/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
- const d=await r.json(); hideLoading();
- if(d.error)return showError(d.error);
- document.getElementById('video-title').textContent=d.title;
- document.getElementById('transcript-length').textContent=`📝 ${d.transcript.length} caratteri`;
- document.getElementById('comments-count').textContent=`💬 Commenti estratti`;
- document.getElementById('transcript-content').textContent=d.transcript;
- document.getElementById('comments-content').textContent=d.comments;
- document.getElementById('results').classList.remove('hidden');
-}
-function showError(m){const e=document.getElementById('error');e.textContent='❌ '+m;e.classList.remove('hidden');}
-function hideError(){document.getElementById('error').classList.add('hidden');}
-function hideResults(){document.getElementById('results').classList.add('hidden');}
-function showLoading(t){document.getElementById('loading-text').textContent=t;document.getElementById('loading').classList.remove('hidden');}
-function hideLoading(){document.getElementById('loading').classList.add('hidden');}
-</script>
-</body></html>'''
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
-# =====================================================================
-# BACKEND
-# =====================================================================
+def classify_zone(row):
+    """Classifica il dispositivo in una zona di sicurezza basato sui dati reali"""
 
-def extract_video_id(url):
-    patterns = [
-        r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([^&\n?#]+)',
-        r'^([a-zA-Z0-9_-]{11})$'
-    ]
-    for pattern in patterns:
-        m = re.search(pattern, url)
-        if m: return m.group(1)
-    return None
+    # Get relevant fields
+    remote_access = str(row.get('Remote Access enabled', '')).lower()
+    network_mode_1 = str(row.get('Network Mode 1', '')).lower()
+    network_mode_2 = str(row.get('Network Mode 2', '')).lower()
+    modality = str(row.get('Modality', ''))
 
+    # Zone 4 - Critical/Remote (has remote access)
+    if 'ja' in remote_access or 'yes' in remote_access:
+        return "Zone 4 – Critical/Remote"
 
-def extract_video_info(video_id):
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    cookies_path = "cookies.txt" if os.path.exists("cookies.txt") else None
+    # Zone 1 - Offline/Low Risk (no network connection)
+    has_network = ('lan' in network_mode_1 or 'wlan' in network_mode_1 or
+                   'lan' in network_mode_2 or 'wlan' in network_mode_2)
+    if not has_network or network_mode_1 == 'nan':
+        return "Zone 1 – Offline/Low Risk"
 
-    ydl_opts = {
-        'skip_download': True,
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'subtitleslangs': ['en', 'it'],
-        'quiet': True,
-        'no_warnings': True,
-        'cookies': cookies_path,
-        'extractor_args': {
-            'youtube': {'player_skip': ['configs', 'js', 'player_response']}
+    # Zone 3 - Sensitive (critical medical imaging devices)
+    critical_modalities = ['XA', 'CT', 'MRI', 'RF', 'EPS']
+    if any(mod in modality for mod in critical_modalities):
+        return "Zone 3 – Sensitive"
+
+    # Zone 2 - Moderate (default for networked devices)
+    return "Zone 2 – Moderate"
+
+def create_detailed_report(df, output_dir, base_name):
+    """Crea report dettagliati per zona con liste dispositivi e analisi"""
+
+    # File principale con tutte le zone
+    main_output = os.path.join(output_dir, f"{base_name}_zoned.xlsx")
+
+    with pd.ExcelWriter(main_output, engine='openpyxl') as writer:
+        # Sheet principale con tutti i dispositivi
+        df.to_excel(writer, sheet_name='All Devices', index=False)
+
+        # Sheet per ogni zona
+        for zone in sorted(df['Zone'].unique()):
+            zone_df = df[df['Zone'] == zone].copy()
+            sheet_name = zone.split('–')[0].strip().replace(' ', '_')
+            zone_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        # Sheet di analisi/raggruppamento
+        analysis_df = create_analysis_summary(df)
+        analysis_df.to_excel(writer, sheet_name='Grouping Analysis', index=False)
+
+    return main_output
+
+def create_analysis_summary(df):
+    """Crea un sommario di analisi per il Zonierungskonzept"""
+
+    analysis_data = []
+
+    # Analisi per Zona
+    for zone in sorted(df['Zone'].unique()):
+        zone_df = df[df['Zone'] == zone]
+
+        # Raggruppa per Manufacturer
+        manufacturer_counts = zone_df['Manufacturer'].value_counts().head(10)
+
+        # Raggruppa per Modality
+        modality_counts = zone_df['Modality'].value_counts().head(10)
+
+        # Raggruppa per Network Type
+        network_counts = zone_df['Network Type'].value_counts().head(5)
+
+        analysis_data.append({
+            'Zone': zone,
+            'Total Devices': len(zone_df),
+            'Unique Manufacturers': zone_df['Manufacturer'].nunique(),
+            'Top Manufacturer': manufacturer_counts.index[0] if len(manufacturer_counts) > 0 else 'N/A',
+            'Top Manufacturer Count': manufacturer_counts.iloc[0] if len(manufacturer_counts) > 0 else 0,
+            'Unique Modalities': zone_df['Modality'].nunique(),
+            'Top Modality': modality_counts.index[0] if len(modality_counts) > 0 else 'N/A',
+            'Top Modality Count': modality_counts.iloc[0] if len(modality_counts) > 0 else 0,
+            'With Remote Access': (zone_df['Remote Access enabled'].str.lower() == 'ja').sum(),
+            'With Network': ((zone_df['Network Mode 1'].notna()) | (zone_df['Network Mode 2'].notna())).sum()
+        })
+
+    return pd.DataFrame(analysis_data)
+
+def process_excel(input_path, output_path, sheet_name=0):
+    """Processa il file Excel e aggiunge la classificazione delle zone"""
+    try:
+        # Leggi il file (skip first 2 rows which are headers/instructions)
+        df = pd.read_excel(input_path, sheet_name=sheet_name, skiprows=2)
+
+        # Applica classificazione
+        df["Zone"] = df.apply(classify_zone, axis=1)
+
+        # Calcola statistiche
+        summary = df["Zone"].value_counts().to_dict()
+
+        # Crea analisi per raggruppamento
+        grouping_data = create_grouping_data(df)
+
+        # Crea dati per grafici
+        chart_data = create_chart_data(df)
+
+        # Crea report dettagliato con sheets multiple
+        output_dir = os.path.dirname(output_path)
+        base_name = os.path.basename(output_path).rsplit('_zoned', 1)[0]
+        create_detailed_report(df, output_dir, base_name)
+
+        return True, summary, df.columns.tolist(), grouping_data, chart_data
+
+    except Exception as e:
+        return False, str(e), [], {}, {}
+
+def create_grouping_data(df):
+    """Crea dati di raggruppamento per il Zonierungskonzept"""
+    grouping = {}
+
+    for zone in sorted(df['Zone'].unique()):
+        zone_df = df[df['Zone'] == zone]
+        grouping[zone] = {
+            'total': len(zone_df),
+            'by_manufacturer': zone_df['Manufacturer'].value_counts().head(5).to_dict(),
+            'by_modality': zone_df['Modality'].value_counts().head(5).to_dict(),
+            'by_network': zone_df['Network Type'].value_counts().to_dict()
         }
+
+    return grouping
+
+def create_chart_data(df):
+    """Crea dati per i grafici visuali"""
+    chart_data = {}
+
+    # Zone distribution (for pie chart)
+    zone_counts = df['Zone'].value_counts().to_dict()
+    chart_data['zones'] = {
+        'labels': list(zone_counts.keys()),
+        'data': list(zone_counts.values()),
+        'colors': ['#4ade80', '#fbbf24', '#fb923c', '#ef4444'][:len(zone_counts)]
     }
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = info.get('title', 'Titolo non disponibile')
-            transcript = extract_subtitles(info)
-            return {'title': title, 'transcript': transcript}
-    except Exception as e:
-        if "Sign in to confirm" in str(e):
-            try:
-                embed_url = f"https://www.youtube.com/embed/{video_id}"
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(embed_url, download=False)
-                    title = info.get('title', 'Titolo non disponibile')
-                    transcript = extract_subtitles(info)
-                    return {'title': title, 'transcript': transcript}
-            except Exception:
-                msg = "⚠️ YouTube richiede autenticazione per questo video."
-                return {'title': 'Video con restrizioni', 'transcript': msg}
-        return {'title': 'Errore', 'transcript': f"Impossibile estrarre informazioni: {e}"}
+    # Top 10 Manufacturers (for bar chart)
+    top_manufacturers = df['Manufacturer'].value_counts().head(10)
+    chart_data['manufacturers'] = {
+        'labels': top_manufacturers.index.tolist(),
+        'data': top_manufacturers.tolist()
+    }
 
+    # Top 10 Modalities (for bar chart)
+    top_modalities = df['Modality'].value_counts().head(10)
+    chart_data['modalities'] = {
+        'labels': top_modalities.index.tolist(),
+        'data': top_modalities.tolist()
+    }
 
-def extract_subtitles(info):
-    try:
-        subtitles = info.get('subtitles', {})
-        auto_subs = info.get('automatic_captions', {})
-        for lang in ['it', 'en']:
-            for source in (subtitles, auto_subs):
-                if lang in source and source[lang]:
-                    url = source[lang][0]['url']
-                    text = download_subtitle_content(url)
-                    if text: return text
-        if auto_subs:
-            first = list(auto_subs.keys())[0]
-            return download_subtitle_content(auto_subs[first][0]['url'])
-        return "⚠️ Trascrizione non disponibile"
-    except Exception as e:
-        return f"Errore estrazione sottotitoli: {e}"
+    # Network distribution
+    network_dist = df['Network Type'].value_counts().to_dict()
+    chart_data['network'] = {
+        'labels': list(network_dist.keys()),
+        'data': list(network_dist.values())
+    }
 
+    # Remote access stats
+    remote_count = int((df['Remote Access enabled'].str.lower() == 'ja').sum())
+    no_remote = int(len(df) - remote_count)
+    chart_data['remote_access'] = {
+        'labels': ['Remote Access Enabled', 'No Remote Access'],
+        'data': [remote_count, no_remote],
+        'colors': ['#ef4444', '#4ade80']
+    }
 
-def download_subtitle_content(url):
-    try:
-        r = requests.get(url, timeout=10)
-        data = r.json()
-        texts = []
-        for event in data.get('events', []):
-            if 'segs' in event:
-                for seg in event['segs']:
-                    t = seg.get('utf8', '').strip()
-                    if t: texts.append(t)
-        return ' '.join(texts)
-    except Exception:
-        return None
+    # Risk matrix: Zone x Modality (heatmap data)
+    risk_matrix = []
+    for zone in sorted(df['Zone'].unique()):
+        zone_data = df[df['Zone'] == zone]
+        top_mods = zone_data['Modality'].value_counts().head(5)
+        risk_matrix.append({
+            'zone': zone.split('–')[0].strip(),
+            'modalities': top_mods.to_dict()
+        })
+    chart_data['risk_matrix'] = risk_matrix
 
-
-def extract_comments(video_id):
-    try:
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        d = YoutubeCommentDownloader()
-        comments = d.get_comments_from_url(url, sort_by=SORT_BY_POPULAR)
-        out = []
-        for i, c in enumerate(comments, 1):
-            a = c.get('author', 'Utente')
-            t = c.get('text', '')
-            v = c.get('votes', '0')
-            if len(t) > 10:
-                out.append(f"{i}. {a} [{v} likes]\\n{t}\\n")
-            if len(out) >= 50: break
-        return "\n".join(out) if out else "Nessun commento trovato"
-    except Exception as e:
-        return f"Errore estrazione commenti: {e}"
-
-# =====================================================================
-# FLASK ROUTES
-# =====================================================================
+    return chart_data
 
 @app.route('/')
 def index():
-    return HTML_TEMPLATE
+    return render_template('index.html')
 
-@app.route('/api/extract', methods=['POST'])
-def api_extract():
-    data = request.get_json()
-    url = data.get('url', '')
-    vid = extract_video_id(url)
-    if not vid:
-        return jsonify({'error': 'URL YouTube non valido'}), 400
-    info = extract_video_info(vid)
-    comments = extract_comments(vid)
-    return jsonify({
-        'title': info['title'],
-        'transcript': info['transcript'],
-        'comments': comments
-    })
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        flash('Nessun file selezionato', 'error')
+        return redirect(url_for('index'))
 
-# =====================================================================
-# MAIN
-# =====================================================================
+    file = request.files['file']
+
+    if file.filename == '':
+        flash('Nessun file selezionato', 'error')
+        return redirect(url_for('index'))
+
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(input_path)
+
+        # Genera nome file output
+        base_name = filename.rsplit('.', 1)[0]
+        output_filename = f"{base_name}_zoned.xlsx"
+        output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
+
+        # Processa il file
+        success, result, columns, grouping_data, chart_data = process_excel(input_path, output_path)
+
+        if success:
+            return render_template('result.html',
+                                 summary=result,
+                                 output_file=output_filename,
+                                 columns=columns,
+                                 grouping_data=grouping_data,
+                                 chart_data=chart_data)
+        else:
+            flash(f'Errore durante il processo: {result}', 'error')
+            return redirect(url_for('index'))
+    else:
+        flash('Formato file non valido. Usa .xlsx o .xls', 'error')
+        return redirect(url_for('index'))
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    output_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
+    return send_file(output_path, as_attachment=True)
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5002))
-    app.run(host='0.0.0.0', port=port)
+    app.run(debug=True)
