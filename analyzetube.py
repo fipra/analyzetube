@@ -11,7 +11,7 @@ Poi apri: http://localhost:5001
 """
 
 from flask import Flask, request, jsonify
-import yt_dlp
+from youtube_transcript_api import YouTubeTranscriptApi
 import re
 import requests
 from youtube_comment_downloader import YoutubeCommentDownloader, SORT_BY_POPULAR
@@ -454,29 +454,18 @@ def extract_video_id(url):
     return None
 
 def extract_video_info(video_id):
-    """Estrae informazioni video e trascrizione usando yt-dlp"""
-    url = f"https://www.youtube.com/watch?v={video_id}"
-
-    ydl_opts = {
-        'skip_download': True,
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'subtitleslangs': ['en', 'it'],
-        'quiet': True,
-        'no_warnings': True,
-    }
-
+    """Estrae informazioni video e trascrizione usando youtube-transcript-api"""
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        # Ottieni il titolo del video
+        title = get_video_title(video_id)
 
-            title = info.get('title', 'Titolo non disponibile')
-            transcript = extract_subtitles(info)
+        # Estrai la trascrizione
+        transcript = extract_transcript(video_id)
 
-            return {
-                'title': title,
-                'transcript': transcript
-            }
+        return {
+            'title': title,
+            'transcript': transcript
+        }
 
     except Exception as e:
         return {
@@ -484,65 +473,62 @@ def extract_video_info(video_id):
             'transcript': f"Impossibile estrarre informazioni: {str(e)}"
         }
 
-def extract_subtitles(info):
-    """Estrae i sottotitoli dal dizionario info di yt-dlp"""
+def get_video_title(video_id):
+    """Ottiene il titolo del video tramite oEmbed API (nessuna autenticazione richiesta)"""
     try:
-        subtitles = info.get('subtitles', {})
-        auto_subs = info.get('automatic_captions', {})
+        url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        return data.get('title', 'Titolo non disponibile')
+    except:
+        return f"Video ID: {video_id}"
 
-        # Prova inglese, poi italiano
-        for lang in ['en', 'it']:
-            if lang in subtitles and subtitles[lang]:
-                result = download_subtitle_content(subtitles[lang][0].get('url'))
-                if result and not result.startswith('Errore'):
-                    return result
+def extract_transcript(video_id):
+    """Estrae la trascrizione usando youtube-transcript-api"""
+    try:
+        # Prova prima con sottotitoli manuali in italiano o inglese
+        transcript_list = YouTubeTranscriptApi.get_transcript(
+            video_id,
+            languages=['it', 'en', 'it-IT', 'en-US', 'en-GB']
+        )
 
-        for lang in ['en', 'it']:
-            if lang in auto_subs and auto_subs[lang]:
-                result = download_subtitle_content(auto_subs[lang][0].get('url'))
-                if result and not result.startswith('Errore'):
-                    return result
-
-        # Prova qualsiasi lingua
-        if auto_subs:
-            first_lang = list(auto_subs.keys())[0]
-            result = download_subtitle_content(auto_subs[first_lang][0].get('url'))
-            if result and not result.startswith('Errore'):
-                return result
-
-        return "⚠️ Trascrizione non disponibile per questo video"
+        # Converti in testo semplice
+        text = ' '.join([item['text'] for item in transcript_list])
+        return text.strip()
 
     except Exception as e:
-        return f"Errore estrazione sottotitoli: {str(e)}"
-
-def download_subtitle_content(url):
-    """Scarica e processa il contenuto dei sottotitoli"""
-    try:
-        import json
-
-        response = requests.get(url, timeout=10)
-
-        # Formato JSON (moderno)
+        # Prova con qualsiasi lingua disponibile
         try:
-            data = json.loads(response.text)
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
-            texts = []
-            for event in data.get('events', []):
-                if 'segs' in event:
-                    for seg in event['segs']:
-                        if 'utf8' in seg:
-                            texts.append(seg['utf8'].strip())
+            # Prova prima i sottotitoli manuali
+            try:
+                transcript = transcript_list.find_manually_created_transcript(['it', 'en'])
+                text = ' '.join([item['text'] for item in transcript.fetch()])
+                return text.strip()
+            except:
+                pass
 
-            if texts:
-                return ' '.join(texts)
+            # Altrimenti usa sottotitoli auto-generati
+            try:
+                transcript = transcript_list.find_generated_transcript(['it', 'en'])
+                text = ' '.join([item['text'] for item in transcript.fetch()])
+                return text.strip()
+            except:
+                pass
 
-        except (json.JSONDecodeError, KeyError):
+            # Ultima chance: prendi la prima trascrizione disponibile
+            for transcript in transcript_list:
+                try:
+                    text = ' '.join([item['text'] for item in transcript.fetch()])
+                    return text.strip()
+                except:
+                    continue
+
+        except:
             pass
 
-        return None
-
-    except Exception as e:
-        return f"Errore download sottotitoli: {str(e)}"
+        return f"⚠️ Trascrizione non disponibile per questo video. Errore: {str(e)}"
 
 def extract_comments(video_id):
     """Estrae i commenti del video usando youtube-comment-downloader"""
@@ -629,11 +615,11 @@ if __name__ == '__main__':
     print("=" * 60)
     print("\n🚀 Server avviato su: http://localhost:5001")
     print("\n📝 Dipendenze richieste:")
-    print("   - yt-dlp")
+    print("   - youtube-transcript-api")
     print("   - youtube-comment-downloader")
     print("   - Flask")
     print("   - requests")
-    print("\n💡 Per installare: pip install flask yt-dlp youtube-comment-downloader requests")
+    print("\n💡 Per installare: pip install flask youtube-transcript-api youtube-comment-downloader requests")
     print("\n" + "=" * 60 + "\n")
 
     app.run(debug=True, port=5002)
