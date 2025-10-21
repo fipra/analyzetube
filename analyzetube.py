@@ -347,6 +347,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.getElementById('transcript-content').textContent = data.transcript;
             document.getElementById('comments-content').textContent = data.comments;
 
+            // Svuota il campo URL per permettere un nuovo inserimento
+            document.getElementById('youtube-url').value = '';
+
             document.getElementById('results').classList.remove('hidden');
             document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
         }
