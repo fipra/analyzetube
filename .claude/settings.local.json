@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ipconfig)",
+      "Bash(findstr:*)",
+      "Bash(netsh advfirewall firewall add rule:*)",
+      "Bash(npm start)",
+      "Bash(dir)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(py:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -23,11 +23,11 @@ app = Flask(__name__)
 # ============================================================================
 
 HTML_TEMPLATE = '''<!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AnalyzeTube - Analisi Video YouTube</title>
+    <title>AnalyzeTube - YouTube Video Analysis</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -241,19 +241,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <div class="container">
         <header>
             <h1>🎥 AnalyzeTube</h1>
-            <p class="subtitle">Analisi automatica di video YouTube con ChatGPT</p>
+            <p class="subtitle">Automatic YouTube Video Analysis with ChatGPT</p>
         </header>
 
         <main>
             <div class="input-section">
-                <label for="youtube-url">URL Video YouTube:</label>
+                <label for="youtube-url">YouTube Video URL:</label>
                 <input type="text" id="youtube-url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
-                <button id="analyze-btn" onclick="analyzeVideo()">Analizza Video</button>
+                <button id="analyze-btn" onclick="analyzeVideo()">Analyze Video</button>
             </div>
 
             <div id="loading" class="loading hidden">
                 <div class="spinner"></div>
-                <p id="loading-text">Estrazione in corso...</p>
+                <p id="loading-text">Extracting data...</p>
             </div>
 
             <div id="error" class="error hidden"></div>
@@ -268,26 +268,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
 
                 <div class="chatgpt-section">
-                    <h3>🤖 Prompt per ChatGPT</h3>
-                    <p class="instruction">Copia questo testo e incollalo in ChatGPT:</p>
+                    <h3>🤖 ChatGPT Prompt</h3>
+                    <p class="instruction">Copy this text and paste it into ChatGPT:</p>
 
                     <div class="prompt-box">
                         <textarea id="chatgpt-prompt" readonly></textarea>
-                        <button class="copy-btn" onclick="copyPrompt()">📋 Copia Prompt</button>
+                        <button class="copy-btn" onclick="copyPrompt()">Copy Prompt</button>
                     </div>
 
                     <div class="chatgpt-link">
-                        <a href="https://chat.openai.com" target="_blank" class="chatgpt-button">Apri ChatGPT →</a>
+                        <a href="https://chat.openai.com" target="_blank" class="chatgpt-button" onclick="copyPromptAndOpen(event)">Open ChatGPT →</a>
                     </div>
                 </div>
 
                 <details class="details-section">
-                    <summary>📝 Trascrizione Completa</summary>
+                    <summary>Full Transcript</summary>
                     <div id="transcript-content" class="content-box"></div>
                 </details>
 
                 <details class="details-section">
-                    <summary>💬 Commenti Estratti</summary>
+                    <summary>Extracted Comments</summary>
                     <div id="comments-content" class="content-box"></div>
                 </details>
             </div>
@@ -304,13 +304,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const url = urlInput.value.trim();
 
             if (!url) {
-                showError('Inserisci un URL di YouTube valido');
+                showError('Please enter a valid YouTube URL');
                 return;
             }
 
             hideError();
             hideResults();
-            showLoading('Estrazione trascrizione e commenti...');
+            showLoading('Extracting transcript and comments...');
             disableButton(true);
 
             try {
@@ -323,13 +323,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Errore durante l\\'estrazione');
+                    throw new Error(data.error || 'Error during extraction');
                 }
 
                 displayResults(data);
 
             } catch (error) {
-                console.error('Errore:', error);
+                console.error('Error:', error);
                 showError(error.message);
             } finally {
                 hideLoading();
@@ -339,8 +339,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         function displayResults(data) {
             document.getElementById('video-title').textContent = data.title;
-            document.getElementById('transcript-length').textContent = `📝 Trascrizione: ${data.transcript.length} caratteri`;
-            document.getElementById('comments-count').textContent = `💬 Commenti estratti`;
+            document.getElementById('transcript-length').textContent = `Transcript: ${data.transcript.length} characters`;
+            document.getElementById('comments-count').textContent = `Comments extracted`;
 
             const prompt = generatePrompt(data);
             document.getElementById('chatgpt-prompt').value = prompt;
@@ -355,25 +355,36 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         function generatePrompt(data) {
-            return `Analizza questo video YouTube e dimmi se ciò che viene detto nel video è confermato dai commenti degli utenti.
+            return `Analyze this YouTube video and verify if what is said in the video is confirmed by user comments and if it has verifiable real-world evidence on the web.
 
-TITOLO VIDEO: ${data.title}
+VIDEO TITLE: ${data.title}
 
-TRASCRIZIONE:
+TRANSCRIPT:
 ${data.transcript}
 
-COMMENTI:
+COMMENTS:
 ${data.comments}
 
 ---
 
-Per favore, fornisci un'analisi breve che risponda a:
-1. Qual è il tema principale del video?
-2. I commenti degli utenti confermano o contraddicono ciò che viene detto nel video?
-3. Ci sono discrepanze significative tra il contenuto del video e le reazioni degli utenti?
-4. Qual è il sentiment generale dei commenti?
+Please provide a comprehensive analysis that answers:
 
-Limita la risposta a 200-300 parole.`;
+1. What is the main topic of the video?
+
+2. Do user comments confirm or contradict what is said in the video?
+
+3. Are there significant discrepancies between the video content and user reactions?
+
+4. What is the general sentiment of the comments?
+
+5. **WEB VERIFICATION**: Search the web to see if the story told in the video has real and verifiable evidence. If you find relevant information, provide:
+   - Confirmation or refutation of the facts presented in the video
+   - Reliable sources that support or contradict the narrative
+   - Direct links to the sources found
+
+Limit your response to 300-400 words, including links to sources.
+
+**IMPORTANT**: Please respond in your default chat language settings (not necessarily in English).`;
         }
 
         function copyPrompt() {
@@ -389,10 +400,30 @@ Limita la risposta a 200-300 parole.`;
             });
         }
 
+        function copyPromptAndOpen(event) {
+            const promptText = document.getElementById('chatgpt-prompt');
+
+            // Copia il prompt
+            promptText.select();
+            promptText.setSelectionRange(0, 99999);
+
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(promptText.value);
+                } else {
+                    document.execCommand('copy');
+                }
+            } catch (err) {
+                console.error('Errore durante la copia:', err);
+            }
+
+            // Il link si aprirà normalmente grazie al target="_blank"
+        }
+
         function showCopySuccess() {
             const btn = event.target;
             const originalText = btn.textContent;
-            btn.textContent = '✓ Copiato!';
+            btn.textContent = '✓ Copied!';
             btn.style.background = '#4caf50';
 
             setTimeout(() => {
@@ -630,13 +661,13 @@ if __name__ == '__main__':
     print("=" * 60)
     print("AnalyzeTube - Versione Unica")
     print("=" * 60)
-    print("\n🚀 Server avviato su: http://localhost:5001")
-    print("\n📝 Dipendenze richieste:")
+    print("\nServer avviato su: http://localhost:5002")
+    print("\nDipendenze richieste:")
     print("   - yt-dlp")
     print("   - youtube-comment-downloader")
     print("   - Flask")
     print("   - requests")
-    print("\n💡 Per installare: pip install flask yt-dlp youtube-comment-downloader requests")
+    print("\nPer installare: pip install flask yt-dlp youtube-comment-downloader requests")
     print("\n" + "=" * 60 + "\n")
 
-    app.run(debug=True, port=5002)
+    app.run(host="0.0.0.0", port=5002, debug=True)
